@@ -10,7 +10,6 @@ next-env.d.ts
 # env files (secrets) — .env.example is committed
 .env
 .env*.local
-.env.test
 
 # test output
 coverage/
@@ -39,3 +38,6 @@ GLOSSARY.md
 Thumbs.db
 .vscode/
 .idea/
+
+# Prisma generated client
+/generated/prisma
