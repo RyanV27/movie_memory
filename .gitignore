@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# env files (secrets) — .env.example is committed
+.env
+.env*.local
+.env.test
+
+# test output
+coverage/
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# local scratch and temp files
+temp/
+
+# Claude Code / agent tooling (local only, not part of the submission)
+.claude/
+CLAUDE.md
+.mcp.json
+docs/
+GLOSSARY.md
+.scratch/
+
+# Office lock files and the take-home brief (not for the public repo)
+~$*
+*.docx
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
