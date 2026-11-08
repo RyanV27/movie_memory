@@ -18,6 +18,6 @@ export default defineConfig({
       use: { ...devices['Desktop Edge'], channel: 'msedge' },
     },
   ],
-  // Uncomment once the app has a dev command:
-  // webServer: { command: 'npm run dev', url: BASE_URL, reuseExistingServer: true },
+  // Starts the app for e2e runs (reuses one already running).
+  webServer: { command: 'npm run dev', url: BASE_URL, reuseExistingServer: true },
 });

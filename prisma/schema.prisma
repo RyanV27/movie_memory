@@ -1,0 +1,9 @@
+// Datasource and generator only; models arrive with the slices that first use them.
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

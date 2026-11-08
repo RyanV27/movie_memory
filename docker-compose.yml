@@ -1,0 +1,21 @@
+# Local dev Postgres. Credentials are throwaway and local-only (not secrets).
+services:
+  db:
+    image: postgres:17
+    container_name: movie-memory-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: movie_memory
+    ports:
+      - "5432:5432"
+    volumes:
+      - movie_memory_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d movie_memory"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  movie_memory_data:
