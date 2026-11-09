@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 type State =
   | { status: "loading" }
-  | { status: "ok"; text: string }
+  | { status: "ok"; text: string; stale: boolean }
   | { status: "pending"; text: string | null; gaveUp: boolean }
   | { status: "error"; message: string };
 
@@ -35,7 +35,7 @@ export function FactCard() {
             timer = setTimeout(load, POLL_MS);
           }
         } else if (res.ok && typeof body?.fact?.text === "string") {
-          setState({ status: "ok", text: body.fact.text });
+          setState({ status: "ok", text: body.fact.text, stale: body.source === "stale" });
         } else {
           const message = typeof body?.error === "string" ? body.error : FALLBACK_ERROR;
           setState({ status: "error", message });
@@ -65,7 +65,16 @@ export function FactCard() {
       {state.status === "loading" && (
         <p className="mt-1 animate-pulse text-zinc-500 dark:text-zinc-400">Finding a fact…</p>
       )}
-      {state.status === "ok" && <p className="mt-1">{state.text}</p>}
+      {state.status === "ok" && (
+        <>
+          <p className="mt-1">{state.text}</p>
+          {state.stale && (
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Couldn&apos;t get a new fact right now — this one is from earlier.
+            </p>
+          )}
+        </>
+      )}
       {state.status === "pending" && (
         <>
           {state.text && <p className="mt-1">{state.text}</p>}
