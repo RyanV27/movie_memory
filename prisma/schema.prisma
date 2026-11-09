@@ -17,6 +17,7 @@ model User {
   favoriteMovie String?   @db.VarChar(100)
   accounts      Account[]
   sessions      Session[]
+  facts         Fact[]
 }
 
 model Account {
@@ -48,4 +49,15 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model Fact {
+  id         String   @id @default(cuid())
+  userId     String
+  movieTitle String   @db.VarChar(100)
+  text       String
+  createdAt  DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, movieTitle, createdAt(sort: Desc)])
 }
