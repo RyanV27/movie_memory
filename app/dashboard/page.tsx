@@ -1,4 +1,5 @@
 import { Avatar } from "@/components/avatar";
+import { FactCard } from "@/components/fact-card";
 import { SignOutButton } from "@/components/sign-out-button";
 import { requireOnboarded } from "@/lib/auth-guards";
 import { displayName } from "@/lib/display-name";
@@ -18,8 +19,7 @@ export default async function DashboardPage() {
           <bdi>{user.favoriteMovie}</bdi>
         </p>
       </div>
-      {/* Ticket 05 fills this with the movie fact; the page never waits for it. */}
-      <section aria-label="Movie fact" />
+      <FactCard />
       <SignOutButton />
     </main>
   );
