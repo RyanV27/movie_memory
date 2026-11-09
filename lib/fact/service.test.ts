@@ -16,7 +16,7 @@ afterAll(async () => {
 });
 
 describe("getFact", () => {
-  it("generates and stores a new fact on every call", async () => {
+  it("generates and stores a fact, then serves it from cache", async () => {
     const user = await prisma.user.create({
       data: { email: `facts${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
     });
@@ -26,15 +26,12 @@ describe("getFact", () => {
     const second = await getFact(user.id, { db: prisma, writer });
 
     expect(first).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 1 about Heat" } });
-    expect(second).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 2 about Heat" } });
-    expect(writer.write).toHaveBeenCalledTimes(2);
+    expect(second).toMatchObject({ kind: "ok", source: "cached", fact: { text: "Fact 1 about Heat" } });
+    expect(writer.write).toHaveBeenCalledTimes(1);
     expect(writer.write).toHaveBeenCalledWith("Heat");
 
-    const rows = await prisma.fact.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" } });
-    expect(rows.map((r) => [r.movieTitle, r.text])).toEqual([
-      ["Heat", "Fact 1 about Heat"],
-      ["Heat", "Fact 2 about Heat"],
-    ]);
+    const rows = await prisma.fact.findMany({ where: { userId: user.id } });
+    expect(rows.map((r) => [r.movieTitle, r.text])).toEqual([["Heat", "Fact 1 about Heat"]]);
   });
 
   it("returns no-movie and skips the writer when the user has no favorite movie", async () => {
@@ -64,5 +61,56 @@ describe("Fact.createdAt", () => {
     );
 
     expect(createdAt.getTime() - txNow.getTime()).toBeGreaterThanOrEqual(1900);
+  });
+});
+
+describe("getFact cache window", () => {
+  // Insert a Fact whose createdAt is `age` old.
+  async function insertFact(userId: string, movieTitle: string, text: string, age: string) {
+    await prisma.$executeRaw`
+      INSERT INTO "Fact" ("id", "userId", "movieTitle", "text", "createdAt")
+      VALUES (${`test-${crypto.randomUUID()}`}, ${userId}, ${movieTitle}, ${text}, clock_timestamp() - ${age}::interval)`;
+  }
+
+  it("returns a 59-second-old fact as cached without calling the writer", async () => {
+    const user = await prisma.user.create({
+      data: { email: `cache-59${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    await insertFact(user.id, "Heat", "Old fact", "59 seconds");
+    const writer = fakeWriter();
+
+    const result = await getFact(user.id, { db: prisma, writer });
+
+    expect(result).toMatchObject({ kind: "ok", source: "cached", fact: { text: "Old fact" } });
+    expect(writer.write).not.toHaveBeenCalled();
+    expect(await prisma.fact.count({ where: { userId: user.id } })).toBe(1);
+  });
+
+  it("generates a new fact when the latest is 60 seconds old", async () => {
+    const user = await prisma.user.create({
+      data: { email: `cache-60${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    await insertFact(user.id, "Heat", "Stale fact", "60 seconds");
+    const writer = fakeWriter();
+
+    const result = await getFact(user.id, { db: prisma, writer });
+
+    expect(result).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 1 about Heat" } });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+    expect(await prisma.fact.count({ where: { userId: user.id } })).toBe(2);
+  });
+
+  it("does not return a fresh fact for a different movie", async () => {
+    const user = await prisma.user.create({
+      data: { email: `cache-movie${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    await insertFact(user.id, "Alien", "Alien fact", "5 seconds");
+    const writer = fakeWriter();
+
+    const result = await getFact(user.id, { db: prisma, writer });
+
+    expect(result).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 1 about Heat" } });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+    expect(writer.write).toHaveBeenCalledWith("Heat");
   });
 });
