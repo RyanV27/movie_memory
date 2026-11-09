@@ -67,7 +67,7 @@ Watch mode reruns tests when you save a file (press `q` to quit):
 npx vitest backend-tests
 ```
 
-They also run as part of the full suite with `npm test`. Don't run `npm test` and `npm run test:e2e` at the same time: each one's cleanup deletes the other's test users.
+They also run as part of the full suite with `npm test`.
 
 ### See the authorization test fail
 

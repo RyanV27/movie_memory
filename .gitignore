@@ -13,10 +13,8 @@ next-env.d.ts
 
 # test output
 coverage/
-playwright-report/
 test-results/
 blob-report/
-playwright/.cache/
 
 # local scratch and temp files
 temp/

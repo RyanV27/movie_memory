@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { cleanup, TEST_EMAIL_DOMAIN } from "@/tests/helpers/cleanup";
+import { cleanup, TEST_EMAIL_DOMAIN } from "@/test_helpers/cleanup";
 import { GET } from "./route";
 
 // Signed-in user id the mocked auth() returns.

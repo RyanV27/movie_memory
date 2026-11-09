@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { getFact } from "@/lib/fact/service";
 import type { FactWriter } from "@/lib/fact/writer";
-import { cleanup, TEST_EMAIL_DOMAIN } from "@/tests/helpers/cleanup";
+import { cleanup, TEST_EMAIL_DOMAIN } from "@/test_helpers/cleanup";
 
 function fakeWriter(): FactWriter & { write: ReturnType<typeof vi.fn> } {
   let n = 0;

@@ -1,4 +1,4 @@
-import { prisma } from "../../lib/prisma";
+import { prisma } from "../lib/prisma";
 import { cleanup } from "./cleanup";
 
 // Clears leftover test users before every run.
