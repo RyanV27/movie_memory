@@ -1,7 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
-// Reuse one client across Next dev hot reloads; otherwise each reload opens a new pool.
+// Reuse one client across Next.js dev hot reloads.
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
 export const prisma =
