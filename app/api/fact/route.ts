@@ -19,6 +19,8 @@ export async function GET() {
   try {
     const result = await getFact(userId, { db: prisma, writer: createOpenAIFactWriter() });
     if (result.kind === "no-movie") return json({ error: "No favorite movie set." }, 409);
+    // Another request is generating: send the stale Fact (or null) and let the client poll.
+    if (result.kind === "pending") return json({ pending: true, fact: result.fact }, 202);
     return json({ fact: result.fact, source: result.source }, 200);
   } catch (error) {
     console.error("GET /api/fact failed", error);

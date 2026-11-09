@@ -114,3 +114,120 @@ describe("getFact cache window", () => {
     expect(writer.write).toHaveBeenCalledWith("Heat");
   });
 });
+
+describe("getFact burst guard", () => {
+  // Writer whose calls wait until the test calls release().
+  function gatedWriter() {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let n = 0;
+    const write = vi.fn(async (title: string) => {
+      const id = ++n;
+      await gate;
+      return `Fact ${id} about ${title}`;
+    });
+    return { writer: { write } as FactWriter & { write: typeof write }, release };
+  }
+
+  // Runs calls in the background and records each result as it settles.
+  function track<T>(promises: Promise<T>[]) {
+    const settled: T[] = [];
+    for (const p of promises) p.then((r) => settled.push(r), () => {});
+    return settled;
+  }
+
+  it("lets one of two concurrent calls generate and answers the other with pending", async () => {
+    const user = await prisma.user.create({
+      data: { email: `burst${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    const { writer, release } = gatedWriter();
+
+    const calls = [getFact(user.id, { db: prisma, writer }), getFact(user.id, { db: prisma, writer })];
+    const settled = track(calls);
+    // The loser answers while the winner is still waiting on the writer.
+    await vi.waitFor(() => expect(settled).toHaveLength(1), { timeout: 3000 });
+    expect(settled[0]).toEqual({ kind: "pending", fact: null });
+
+    release();
+    const results = await Promise.all(calls);
+
+    expect(results.filter((r) => r.kind === "pending")).toHaveLength(1);
+    expect(results.filter((r) => r.kind === "ok" && r.source === "generated")).toHaveLength(1);
+    expect(writer.write).toHaveBeenCalledTimes(1);
+    expect(await prisma.fact.count({ where: { userId: user.id } })).toBe(1);
+
+    // The winner's fact is now fresh, so the next call is cached.
+    const next = await getFact(user.id, { db: prisma, writer });
+    expect(next).toMatchObject({ kind: "ok", source: "cached", fact: { text: "Fact 1 about Heat" } });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the latest stale fact with pending", async () => {
+    const user = await prisma.user.create({
+      data: { email: `burst-stale${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    await prisma.$executeRaw`
+      INSERT INTO "Fact" ("id", "userId", "movieTitle", "text", "createdAt")
+      VALUES (${`test-${crypto.randomUUID()}`}, ${user.id}, 'Heat', 'Old fact', clock_timestamp() - interval '5 minutes')`;
+    const { writer, release } = gatedWriter();
+
+    const calls = [getFact(user.id, { db: prisma, writer }), getFact(user.id, { db: prisma, writer })];
+    const settled = track(calls);
+    await vi.waitFor(() => expect(settled).toHaveLength(1), { timeout: 3000 });
+    expect(settled[0]).toMatchObject({ kind: "pending", fact: { text: "Old fact" } });
+
+    release();
+    await Promise.all(calls);
+    expect(writer.write).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not block different users", async () => {
+    const [a, b] = await Promise.all(
+      ["burst-a", "burst-b"].map((name) =>
+        prisma.user.create({ data: { email: `${name}${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" } }),
+      ),
+    );
+    const { writer, release } = gatedWriter();
+
+    const calls = [getFact(a.id, { db: prisma, writer }), getFact(b.id, { db: prisma, writer })];
+    // Both reach the writer at once, so neither waited on the other's lock.
+    await vi.waitFor(() => expect(writer.write).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    release();
+    const results = await Promise.all(calls);
+
+    expect(results.map((r) => r.kind === "ok" && r.source)).toEqual(["generated", "generated"]);
+    expect(await prisma.fact.count({ where: { userId: a.id } })).toBe(1);
+    expect(await prisma.fact.count({ where: { userId: b.id } })).toBe(1);
+  });
+
+  it("re-checks freshness after the lock on the live clock, not the transaction's now()", async () => {
+    const user = await prisma.user.create({
+      data: { email: `burst-clock${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    const writer = fakeWriter();
+    // Before the service's own work in its transaction: commit a fact 59s old, then wait 2s.
+    // Fresh against the frozen now() (tx start), stale against clock_timestamp() at re-check.
+    const db = new Proxy(prisma, {
+      get(target, prop) {
+        if (prop === "$transaction") {
+          return (fn: (tx: unknown) => Promise<unknown>, opts: object) =>
+            target.$transaction(async (tx) => {
+              await tx.$queryRaw`SELECT now()`;
+              await prisma.$executeRaw`
+                INSERT INTO "Fact" ("id", "userId", "movieTitle", "text", "createdAt")
+                VALUES (${`test-${crypto.randomUUID()}`}, ${user.id}, 'Heat', 'Almost stale', clock_timestamp() - interval '59 seconds')`;
+              await tx.$executeRaw`SELECT pg_sleep(2)`;
+              return fn(tx);
+            }, opts);
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const result = await getFact(user.id, { db, writer });
+
+    expect(result).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 1 about Heat" } });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+  });
+});
