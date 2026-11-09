@@ -10,10 +10,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts"],
-    exclude: ["node_modules/**", "tests/**", ".next/**", "temp/**"],
+    exclude: ["node_modules/**", "test_helpers/**", ".next/**", "temp/**"],
     passWithNoTests: true,
     // One file at a time: cleanup deletes all test users.
     fileParallelism: false,
-    globalSetup: ["./tests/helpers/global-setup.ts"],
+    globalSetup: ["./test_helpers/global-setup.ts"],
   },
 });
