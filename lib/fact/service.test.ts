@@ -9,6 +9,13 @@ function fakeWriter(): FactWriter & { write: ReturnType<typeof vi.fn> } {
   return { write: vi.fn(async (title: string) => `Fact ${++n} about ${title}`) };
 }
 
+// Insert a Fact whose createdAt is `age` old.
+async function insertFact(userId: string, movieTitle: string, text: string, age: string) {
+  await prisma.$executeRaw`
+    INSERT INTO "Fact" ("id", "userId", "movieTitle", "text", "createdAt")
+    VALUES (${`test-${crypto.randomUUID()}`}, ${userId}, ${movieTitle}, ${text}, clock_timestamp() - ${age}::interval)`;
+}
+
 beforeAll(cleanup);
 afterAll(async () => {
   await cleanup();
@@ -28,7 +35,7 @@ describe("getFact", () => {
     expect(first).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 1 about Heat" } });
     expect(second).toMatchObject({ kind: "ok", source: "cached", fact: { text: "Fact 1 about Heat" } });
     expect(writer.write).toHaveBeenCalledTimes(1);
-    expect(writer.write).toHaveBeenCalledWith("Heat");
+    expect(writer.write).toHaveBeenCalledWith("Heat", expect.any(AbortSignal));
 
     const rows = await prisma.fact.findMany({ where: { userId: user.id } });
     expect(rows.map((r) => [r.movieTitle, r.text])).toEqual([["Heat", "Fact 1 about Heat"]]);
@@ -65,13 +72,6 @@ describe("Fact.createdAt", () => {
 });
 
 describe("getFact cache window", () => {
-  // Insert a Fact whose createdAt is `age` old.
-  async function insertFact(userId: string, movieTitle: string, text: string, age: string) {
-    await prisma.$executeRaw`
-      INSERT INTO "Fact" ("id", "userId", "movieTitle", "text", "createdAt")
-      VALUES (${`test-${crypto.randomUUID()}`}, ${userId}, ${movieTitle}, ${text}, clock_timestamp() - ${age}::interval)`;
-  }
-
   it("returns a 59-second-old fact as cached without calling the writer", async () => {
     const user = await prisma.user.create({
       data: { email: `cache-59${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
@@ -111,7 +111,7 @@ describe("getFact cache window", () => {
 
     expect(result).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 1 about Heat" } });
     expect(writer.write).toHaveBeenCalledTimes(1);
-    expect(writer.write).toHaveBeenCalledWith("Heat");
+    expect(writer.write).toHaveBeenCalledWith("Heat", expect.any(AbortSignal));
   });
 });
 
@@ -229,5 +229,95 @@ describe("getFact burst guard", () => {
 
     expect(result).toMatchObject({ kind: "ok", source: "generated", fact: { text: "Fact 1 about Heat" } });
     expect(writer.write).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getFact failure handling", () => {
+  // Writer that always rejects with a provider-like error.
+  function failingWriter() {
+    return { write: vi.fn(async () => Promise.reject(new Error("OpenAI 500: upstream failure"))) };
+  }
+
+  // Writer that never settles and ignores the signal; records the signal it was given.
+  function hangingWriter() {
+    const signals: (AbortSignal | undefined)[] = [];
+    const write = vi.fn((_title: string, signal?: AbortSignal) => {
+      signals.push(signal);
+      return new Promise<string>(() => {});
+    });
+    return { writer: { write } as FactWriter & { write: typeof write }, signals };
+  }
+
+  beforeAll(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterAll(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns the older fact as stale when the writer throws", async () => {
+    const user = await prisma.user.create({
+      data: { email: `fail-stale${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    await insertFact(user.id, "Heat", "Old fact", "5 minutes");
+    const writer = failingWriter();
+
+    const result = await getFact(user.id, { db: prisma, writer });
+
+    expect(result).toMatchObject({ kind: "ok", source: "stale", fact: { text: "Old fact" } });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+    expect(await prisma.fact.count({ where: { userId: user.id } })).toBe(1);
+  });
+
+  it("returns failed and stores nothing when the writer throws and there is no fact", async () => {
+    const user = await prisma.user.create({
+      data: { email: `fail-none${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    const writer = failingWriter();
+
+    const result = await getFact(user.id, { db: prisma, writer });
+
+    expect(result).toEqual({ kind: "failed" });
+    expect(await prisma.fact.count({ where: { userId: user.id } })).toBe(0);
+  });
+
+  it("treats a writer that hangs past the timeout as failed", async () => {
+    const user = await prisma.user.create({
+      data: { email: `hang-none${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    const { writer } = hangingWriter();
+
+    const started = Date.now();
+    const result = await getFact(user.id, { db: prisma, writer, aiTimeoutMs: 50 });
+
+    expect(result).toEqual({ kind: "failed" });
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(await prisma.fact.count({ where: { userId: user.id } })).toBe(0);
+  });
+
+  it("returns the older fact as stale when the writer hangs past the timeout", async () => {
+    const user = await prisma.user.create({
+      data: { email: `hang-stale${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    await insertFact(user.id, "Heat", "Old fact", "5 minutes");
+    const { writer } = hangingWriter();
+
+    const result = await getFact(user.id, { db: prisma, writer, aiTimeoutMs: 50 });
+
+    expect(result).toMatchObject({ kind: "ok", source: "stale", fact: { text: "Old fact" } });
+    expect(await prisma.fact.count({ where: { userId: user.id } })).toBe(1);
+  });
+
+  it("aborts the writer's signal when the timeout fires", async () => {
+    const user = await prisma.user.create({
+      data: { email: `hang-signal${TEST_EMAIL_DOMAIN}`, favoriteMovie: "Heat" },
+    });
+    const { writer, signals } = hangingWriter();
+
+    await getFact(user.id, { db: prisma, writer, aiTimeoutMs: 50 });
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]?.aborted).toBe(true);
   });
 });

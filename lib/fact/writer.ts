@@ -1,4 +1,4 @@
-// Writes one short fact about a movie title.
+// Writes one short fact about a movie title; should stop when the signal aborts.
 export interface FactWriter {
-  write(movieTitle: string): Promise<string>;
+  write(movieTitle: string, signal?: AbortSignal): Promise<string>;
 }
