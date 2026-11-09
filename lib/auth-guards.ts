@@ -5,10 +5,8 @@ import { auth } from "@/auth";
 
 type SessionUser = Session["user"];
 
-// Ticket 03 replaces this with a check of User.favoriteMovie.
 export function hasFavoriteMovie(user: SessionUser): boolean {
-  void user;
-  return false;
+  return user.favoriteMovie != null;
 }
 
 export async function requireUser() {
