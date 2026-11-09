@@ -14,5 +14,6 @@ export default defineConfig({
     passWithNoTests: true,
     // One file at a time: cleanup deletes all test users.
     fileParallelism: false,
+    globalSetup: ["./tests/helpers/global-setup.ts"],
   },
 });
